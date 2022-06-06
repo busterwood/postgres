@@ -1,3 +1,5 @@
+from __future__ import annotations # allow __enter__ to return Connection
+from types import TracebackType
 from typing import Any
 
 
@@ -9,7 +11,7 @@ class DataTable:
     def column_count(self) -> int:
         raise NotImplementedError()
 
-    def __getitem__(self, location:slice) -> str:
+    def __getitem__(self, location:tuple[int, int]) -> str:
         raise NotImplementedError()
 
     def get_name(self, column: int) -> str:
@@ -63,6 +65,10 @@ class ForwardCursor:
 class Connection():
     """A connection to PostgreSQL"""
 
+    def __init__(self, connection_string:str):
+        """Opens a new connection to PostgreSQL"""
+        raise NotImplementedError()
+
     def query(self, sql:str, *args: Any) -> DataTable:
         """Run a SQL query that returns a table of zero or more rows, e.g. SELECT.  The DataTable is buffered into client memory."""
         raise NotImplementedError()
@@ -95,7 +101,7 @@ class Connection():
         """Starts a COPY ... FROM STDIN operation"""
         raise NotImplementedError()
 
-    def put_copy_data(self, data:str) -> None:
+    def write_copy_data(self, data:str) -> None:
         """Sends a block of data to PostgreSQL as part of the COPY ... FROM STDIN operation"""
         raise NotImplementedError()
         
@@ -103,18 +109,12 @@ class Connection():
         """Finishes the COPY operation started by start_copy_in()"""
         raise NotImplementedError()
         
-    @staticmethod
-    def open(connection_string:str) -> Connection:
-        """Opens a new connection to PostgreSQL"""
-        return Connection()
-
     def close(self) -> None:
         """Closes this connection to PostgreSQL"""
         raise NotImplementedError()
 
-    def __enter__(self):
-        pass
+    def __enter__(self) -> Connection:
+        return self
 
-    def __exit__(self):
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, traceback: TracebackType | None) -> None:
         self.close()
-
