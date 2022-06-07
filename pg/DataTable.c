@@ -10,8 +10,7 @@ typedef struct {
 } DataTableObject;
 
 
-static void DataTable_dealloc(DataTableObject *self)
-{
+static void DataTable_dealloc(DataTableObject *self) {
     // release the result set
     if (self->res != NULL) {
         PQclear(self->res);

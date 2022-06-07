@@ -91,7 +91,7 @@ class Connection():
         """Run a multiple SQL statements, each one must not return any rows."""
         raise NotImplementedError()
 
-    def query_stream(self, sql:str, *args: Any, binary_format:bool=False) -> ForwardCursor:
+    def start_query(self, sql:str, *args: Any, binary_format:bool=False) -> ForwardCursor:
         """Sends a SQL query to the server but does not wait for it to finish. 
         Results are accessed via the returned forward-only cursor that does NOT buffer the results, 
         useful for reading large number of rows."""

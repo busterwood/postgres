@@ -3,11 +3,12 @@
 #include <libpq-fe.h>
 
 PyObject* DataTable_new(PGresult* res);
+PyObject* ForwardCursor_new(PGconn* conn);
 
 typedef struct {
     PyObject_HEAD
     /* Type-specific fields go here. */
-    PGconn *conn;
+    PGconn* conn;
 } ConnectionObject;
 
 
@@ -99,6 +100,8 @@ static PyObject* Connection_execute(ConnectionObject *self, PyObject* const* arg
     for (size_t i = 0; i < nargs-1; i++) {
         Py_DECREF(str_args[i]);
     }
+    free(str_args);
+    free(utf8_args);
 
     ExecStatusType status = PQresultStatus(res);
     switch (status) {
@@ -139,6 +142,8 @@ static PyObject* Connection_query(ConnectionObject *self, PyObject* const* args,
     for (size_t i = 0; i < nargs-1; i++) {
         Py_DECREF(str_args[i]);
     }
+    free(str_args);
+    free(utf8_args);
 
     ExecStatusType status = PQresultStatus(res);
     switch (status) {
@@ -155,6 +160,50 @@ static PyObject* Connection_query(ConnectionObject *self, PyObject* const* args,
     return DataTable_new(res);
 }
 
+static PyObject* Connection_start_query(ConnectionObject *self, PyObject* const* args, Py_ssize_t nargs) {
+    char* error_message = NULL;
+        
+    if (!nargs || !PyUnicode_Check(args[0])) {
+        PyErr_SetString(PyExc_ValueError, "expected the first argument 'sql_script' to be a string");
+        return NULL;
+    }
+    const char* sql_script = PyUnicode_AsUTF8(args[0]);
+
+    // convert all args to strings
+    PyObject** str_args = (PyObject**)malloc(nargs * sizeof(PyObject));
+    const char** utf8_args = (const char**)malloc(nargs * sizeof(char*));
+    for (size_t i = 0; i < nargs-1; i++)
+    {
+        str_args[i] = PyObject_Str(args[i+1]);
+        utf8_args[i] = PyUnicode_AsUTF8(str_args[i]); // get UTF8 version - no need to free this as it is freed when the str python object is freed
+    }
+    
+    // make sure result is cleared
+    int send_status = PQsendQueryParams(self->conn, sql_script, nargs-1, NULL, utf8_args, NULL, NULL, 0);
+
+    // free args (this also frees the utf8 char* at the same time)
+    for (size_t i = 0; i < nargs-1; i++) {
+        Py_DECREF(str_args[i]);
+    }
+    free(str_args);
+    free(utf8_args);
+
+    if (send_status == 0) {
+        error_message = PQerrorMessage(self->conn);
+        PyErr_SetString(PyExc_ConnectionError, error_message);
+        return NULL;
+    }
+
+    PQsetSingleRowMode(self->conn);
+
+    return Py_None;
+}
+
+static PyObject* Connection_end_query(ConnectionObject *self, PyObject* const* args, Py_ssize_t nargs) {
+    return ForwardCursor_new(self->conn);
+}
+
+
 //
 // Connection type definition
 //
@@ -163,6 +212,8 @@ static PyMethodDef Connection_methods[] = {
     {"execute_script", (PyCFunction) Connection_execute_script, METH_FASTCALL, "Run a multiple SQL statements, each one must not return any rows."},
     {"execute", (PyCFunction) Connection_execute, METH_FASTCALL, "Run a SQL statement that does not return any rows, e.g. INSERT, UPDATE or DELETE, and wait for the statement to finish."},
     {"query", (PyCFunction) Connection_query, METH_FASTCALL, "Run a SQL statement that returns a table of data."},
+    {"start_query", (PyCFunction) Connection_start_query, METH_FASTCALL, "Starts running a SQL statement but dont wait for the result."},
+    {"end_query", (PyCFunction) Connection_end_query, METH_FASTCALL, "Create a ForwardCursor for the previous call to start_query."},
     {NULL}  /* Sentinel */
 };
 
@@ -189,11 +240,12 @@ static PyModuleDef ConnectionModule = {
 
 // defined in DataTable.c
 extern PyTypeObject DataTableType;
+extern PyTypeObject ForwardCursorType;
 
 PyMODINIT_FUNC PyInit_libpg(void)
 {
     PyObject *m;
-    if (PyType_Ready(&ConnectionType) < 0 || PyType_Ready(&DataTableType) < 0)
+    if (PyType_Ready(&ConnectionType) < 0 || PyType_Ready(&DataTableType) < 0 || PyType_Ready(&ForwardCursorType) < 0)
         return NULL;
 
     m = PyModule_Create(&ConnectionModule);
@@ -210,6 +262,13 @@ PyMODINIT_FUNC PyInit_libpg(void)
     Py_INCREF(&DataTableType);
     if (PyModule_AddObject(m, "DataTable", (PyObject *) &DataTableType) < 0) {
         Py_DECREF(&DataTableType);
+        Py_DECREF(m);
+        return NULL;
+    }
+
+    Py_INCREF(&ForwardCursorType);
+    if (PyModule_AddObject(m, "ForwardCursor", (PyObject *) &ForwardCursorType) < 0) {
+        Py_DECREF(&ForwardCursorType);
         Py_DECREF(m);
         return NULL;
     }
