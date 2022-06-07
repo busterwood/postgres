@@ -14,7 +14,7 @@ class DataTable:
     def __getitem__(self, location:tuple[int, int]) -> str:
         raise NotImplementedError()
 
-    def get_name(self, column: int) -> str:
+    def column_name(self, column: int) -> str:
         raise NotImplementedError()
 
     def get_column_index(self, column_name: str) -> int:
