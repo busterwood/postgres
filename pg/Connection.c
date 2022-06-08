@@ -217,7 +217,86 @@ static PyObject* Connection_end_query(ConnectionObject *self, PyObject* const* a
     return ForwardCursor_new(self->conn);
 }
 
+static PyObject* Connection_start_copy(ConnectionObject *self, PyObject* const* args, Py_ssize_t nargs) {
+    char* error_message = NULL;
+        
+    if (!nargs || !PyUnicode_Check(args[0])) {
+        PyErr_SetString(PyExc_ValueError, "expected the first argument 'sql_script' to be a string");
+        return NULL;
+    }
+    const char* sql_script = PyUnicode_AsUTF8(args[0]);
 
+    // make sure result is cleared (GCC-specific)
+    PGresult* res __attribute__((cleanup(free_result))) = PQexec(self->conn, sql_script);
+
+    ExecStatusType status = PQresultStatus(res);
+    switch (status) {
+        case PGRES_COPY_IN:
+            break;
+        default:
+            error_message = PQerrorMessage(self->conn);
+            PyErr_SetString(PyExc_ConnectionError, error_message);
+            return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject* Connection_put_copy_data(ConnectionObject *self, PyObject* const* args, Py_ssize_t nargs) {
+    char* error_message = NULL;
+        
+    if (!nargs || !PyUnicode_Check(args[0])) {
+        PyErr_SetString(PyExc_ValueError, "expected the first argument 'buffer' to be a string");
+        return NULL;
+    }
+    Py_ssize_t size;
+    const char* buffer = PyUnicode_AsUTF8AndSize(args[0], &size);
+
+    int status = PQputCopyData(self->conn, buffer, size);
+    switch (status) {
+        case 1: // all good
+            break;
+        case 0: // this should not happen
+            assert(0);
+            return NULL;
+        case -1:
+            error_message = PQerrorMessage(self->conn);
+            PyErr_SetString(PyExc_ConnectionError, error_message);
+            return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject* Connection_end_copy(ConnectionObject *self, PyObject* const* args, Py_ssize_t nargs) {
+    char* error_message = NULL;
+
+    int copy_status = PQputCopyEnd(self->conn, NULL);
+    if (copy_status == -1) {
+        error_message = PQerrorMessage(self->conn);
+        PyErr_SetString(PyExc_ConnectionError, error_message);
+        return NULL;
+    }
+
+    // make sure result is cleared (GCC-specific)
+    PGresult* res __attribute__((cleanup(free_result))) = PQgetResult(self->conn);
+
+    ExecStatusType status = PQresultStatus(res);
+    switch (status) {
+        case PGRES_COMMAND_OK:
+            break;
+        default:
+            error_message = PQerrorMessage(self->conn);
+            PyErr_SetString(PyExc_ConnectionError, error_message);
+            return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+
+static PyObject* Connection_close(ConnectionObject *self, PyObject* const* args, Py_ssize_t nargs) {
+    PQfinish(self->conn);
+    self->conn = NULL;
+    Py_RETURN_NONE;
+}
 //
 // Connection type definition
 //
@@ -228,6 +307,10 @@ static PyMethodDef Connection_methods[] = {
     {"query", (PyCFunction) Connection_query, METH_FASTCALL, "Run a SQL statement that returns a table of data."},
     {"start_query", (PyCFunction) Connection_start_query, METH_FASTCALL|METH_KEYWORDS, "Starts running a SQL statement but dont wait for the result."},
     {"end_query", (PyCFunction) Connection_end_query, METH_FASTCALL, "Create a ForwardCursor for the previous call to start_query."},
+    {"start_copy", (PyCFunction) Connection_start_copy, METH_FASTCALL, "Starts a copy operation using the supplied SQL script."},
+    {"put_copy_data", (PyCFunction) Connection_put_copy_data, METH_FASTCALL, "Sends copy data to the server to for in-progress copy operation"},
+    {"end_copy", (PyCFunction) Connection_end_copy, METH_FASTCALL, "Ends the in-progress copy operation."},
+    {"close", (PyCFunction) Connection_close, METH_FASTCALL, "Closes this connection."},
     {NULL}  /* Sentinel */
 };
 
