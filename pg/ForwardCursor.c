@@ -115,6 +115,18 @@ static PyObject* ForwardCursor_get_str(ForwardCursorObject *self, PyObject* cons
     return PyUnicode_FromString(value);
 }
 
+
+static inline float float_from_nbo(float* inPtr) {
+    float out;
+    float* outPtr = &out;
+    uint32_t *i = (uint32_t *)inPtr;
+    uint32_t *r = (uint32_t *)outPtr;
+
+    /* convert input to network byte order */
+    r[0] = htonl((uint32_t)*i);
+    return out;
+}
+
 static inline double double_from_nbo(double* inPtr) {
     double out;
     double* outPtr = &out;
@@ -157,9 +169,22 @@ static PyObject* ForwardCursor_get_float(ForwardCursorObject *self, PyObject* co
 
     if (PQfformat(self->res, column)) {
         // binary
-        double* value_in_nbo = (double*) PQgetvalue(self->res, row, column);
-        double value = double_from_nbo(value_in_nbo);
-        return PyFloat_FromDouble(value);
+        Oid col_type = PQftype(self->res, column);
+        switch (col_type) {
+            case 700: {// FLOAT4 
+                float* value_in_nbo = (float*) PQgetvalue(self->res, row, column);
+                float value = float_from_nbo(value_in_nbo);
+                return PyFloat_FromDouble(value);
+            }
+            case 701: {// FLOAT8 
+                double* value_in_nbo = (double*) PQgetvalue(self->res, row, column);
+                double value = double_from_nbo(value_in_nbo);
+                return PyFloat_FromDouble(value);
+            }
+            default:
+                PyErr_Format(PyExc_ValueError, "Cannot read binary as float for Oid type %i.", col_type);
+                return NULL;
+        }
     } else {
         // text
         char* text = PQgetvalue(self->res, row, column);        
@@ -189,12 +214,12 @@ static PyObject* ForwardCursor_get_int(ForwardCursorObject *self, PyObject* cons
         switch (col_type) {
             case 21: {// INT2 
                 short* value_in_nbo = (short*) PQgetvalue(self->res, row, column);
-                short value = htons(*value_in_nbo);
+                short value = ntohs(*value_in_nbo);
                 return PyLong_FromLong(value);
             }
             case 23: { // INT4 
                 int* value_in_nbo = (int*) PQgetvalue(self->res, row, column);
-                int value = htonl(*value_in_nbo);
+                int value = ntohl(*value_in_nbo);
                 return PyLong_FromLong(value);
             }
             case 20: {// INT8 
@@ -213,30 +238,9 @@ static PyObject* ForwardCursor_get_int(ForwardCursorObject *self, PyObject* cons
     }
 }
 
-//TODO; 
 static PyObject* ForwardCursor_get_bool(ForwardCursorObject *self, PyObject* const* args, Py_ssize_t nargs) {
-    PyObject* str = ForwardCursor_get_str(self, args, nargs);
-    if (!PyUnicode_Check(str)) {
-        return str;
-    }
-    if (_PyUnicode_EqualToASCIIString(str, "True")) {
-        Py_DECREF(str);
-        Py_RETURN_TRUE;
-    }
-    else if (_PyUnicode_EqualToASCIIString(str, "False")) {
-        Py_DECREF(str);
-        Py_RETURN_FALSE;
-    }
-
-    Py_DECREF(str);
-    PyErr_Format(PyExc_ValueError, "'%s' is not a valid bool", str);
-    return NULL;
-}
-
-//TODO; 
-static PyObject* ForwardCursor_get_value(ForwardCursorObject *self, PyObject* const* args, Py_ssize_t nargs) {
     if (!nargs) {
-        PyErr_SetString(PyExc_ValueError, "expected the column index or name.");
+        PyErr_SetString(PyExc_ValueError, "expected the column index.");
         return NULL;
     }
 
@@ -248,6 +252,44 @@ static PyObject* ForwardCursor_get_value(ForwardCursorObject *self, PyObject* co
     const int row = 0;
     if (PQgetisnull(self->res, row, column)) {
         Py_RETURN_NONE;
+    }
+
+    if (PQfformat(self->res, column)) {
+        // binary
+        Oid col_type = PQftype(self->res, column);
+        switch (col_type) {
+            case 16: {// BOOL
+                pqbool* value = (pqbool*) PQgetvalue(self->res, row, column);
+                if (*value) {
+                    Py_RETURN_TRUE;
+                } else {
+                    Py_RETURN_FALSE;
+                }
+            }
+            default:
+                PyErr_Format(PyExc_ValueError, "Cannot read binary as bool for Oid type %i.", col_type);
+                return NULL;
+        }
+    } else {
+        // text
+        char* text = PQgetvalue(self->res, row, column);
+        if (text[0] == 'T') {
+            Py_RETURN_TRUE;
+        } else {
+            Py_RETURN_FALSE;
+        }
+    }
+}
+
+static PyObject* ForwardCursor_get_value(ForwardCursorObject *self, PyObject* const* args, Py_ssize_t nargs) {
+    if (!nargs) {
+        PyErr_SetString(PyExc_ValueError, "expected the column index or name.");
+        return NULL;
+    }
+
+    int column = check_column(self->res, args[0]);
+    if (column == -1) {
+        return NULL;
     }
 
     Oid col_type = PQftype(self->res, column);
@@ -302,35 +344,6 @@ static PyObject* ForwardCursor_next_row(ForwardCursorObject *self, PyObject* ign
     }
 }
 
-static PyObject* ForwardCursor_GetItem_sequence(PyObject* obj, Py_ssize_t column) {
-    PyObject* arg = PyLong_FromLong(column);
-    return ForwardCursor_get_value((ForwardCursorObject*)obj, &arg, 1);
-}
-
-static PyObject* ForwardCursor_iter(PyObject* self) {
-    return self;
-}
-
-static PyObject* ForwardCursor_iternext(PyObject* obj) {
-    ForwardCursorObject* self = (ForwardCursorObject*)obj;
-    PyObject* moved_obj = ForwardCursor_next_row(self, NULL);
-    if (moved_obj == NULL) {
-        return NULL;
-    }
-    int moved = Py_IsTrue(moved_obj);
-    Py_DECREF(moved_obj);
-    return moved ? obj : NULL;
-}
-
-static PyObject* ForwardCursor_getattro(ForwardCursorObject* self, PyObject* attr) {
-    PyObject* real_attr = PyObject_GenericGetAttr((PyObject*)self, attr);
-    if (!PyErr_Occurred()) {
-        return real_attr;
-    }
-    PyErr_Clear();
-    return ForwardCursor_get_value(self, &attr, 1);
-}
-
 //
 // ForwardCursor type definition
 //
@@ -349,12 +362,6 @@ static PyMethodDef ForwardCursor_methods[] = {
     {NULL}  /* Sentinel */
 };
 
-static PySequenceMethods ForwardCursor_sequence_methods[] = {
-    NULL,
-    NULL,
-    NULL,
-    ForwardCursor_GetItem_sequence,
-};
 
 PyTypeObject ForwardCursorType = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -366,10 +373,6 @@ PyTypeObject ForwardCursorType = {
     .tp_new = NULL,
     .tp_dealloc = (destructor) ForwardCursor_dealloc,
     .tp_methods = ForwardCursor_methods,
-    .tp_as_sequence = ForwardCursor_sequence_methods,
-    .tp_iter = ForwardCursor_iter,
-    .tp_iternext = ForwardCursor_iternext,
-    // .tp_getattro = (getattrofunc)ForwardCursor_getattro,
 };
 
 // allow the connection to create a forward cursor
@@ -380,13 +383,3 @@ PyObject* ForwardCursor_new(PGconn* conn) {
     return (PyObject*)obj;
 }
 
-/*
-
-import libpg as pg
-c = pg.Connection("postgresql://flyway@api-dev.db.gfknewron.com:5432/newron")
-c.start_query("select * from sales.item_outlet_sales where country_code = $1 and item_group_code = $2 and periodicity = 'Monthly'", 'DE', 'MOBILE_COMPUTING')
-cur = c.end_query()
-while cur.next_row():
-  print(cur[0], cur.periodicity, cur.year, cur.position_in_year)
-
-*/
