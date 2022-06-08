@@ -1,7 +1,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <libpq-fe.h>
-
+#include <arpa/inet.h>
 
 typedef struct {
     PyObject_HEAD
@@ -57,7 +57,6 @@ static PyObject* ForwardCursor_column_index(ForwardCursorObject *self, PyObject*
 static inline int check_column(PGresult* res, PyObject* arg) {
     int column = 0;
     if (PyLong_Check(arg)) {
-
         column = PyLong_AsLong(arg);
         int columns = PQnfields(res);
         if (column < 0)
@@ -116,26 +115,105 @@ static PyObject* ForwardCursor_get_str(ForwardCursorObject *self, PyObject* cons
     return PyUnicode_FromString(value);
 }
 
+static inline double double_from_nbo(double* inPtr) {
+    double out;
+    double* outPtr = &out;
+    uint64_t *i = (uint64_t *)inPtr;
+    uint32_t *r = (uint32_t *)outPtr;
+
+    /* convert input to network byte order */
+    r[0] = htonl((uint32_t)((*i) >> 32));
+    r[1] = htonl((uint32_t)*i);
+    return out;
+}
+
+static inline long long_from_nbo(long* inPtr) {
+    long out;
+    long* outPtr = &out;
+    uint64_t *i = (uint64_t *)inPtr;
+    uint32_t *r = (uint32_t *)outPtr;
+
+    /* convert input to network byte order */
+    r[0] = htonl((uint32_t)((*i) >> 32));
+    r[1] = htonl((uint32_t)*i);
+    return out;
+}
+
 static PyObject* ForwardCursor_get_float(ForwardCursorObject *self, PyObject* const* args, Py_ssize_t nargs) {
-    PyObject* str = ForwardCursor_get_str(self, args, nargs);
-    if (!PyUnicode_Check(str)) {
-        return str;
+    if (!nargs) {
+        PyErr_SetString(PyExc_ValueError, "expected the column index.");
+        return NULL;
     }
-    PyObject* value = PyFloat_FromString(str);
-    Py_DECREF(str);
-    return value;
+
+    int column = check_column(self->res, args[0]);
+    if (column == -1) {
+        return NULL;
+    }
+
+    const int row = 0;
+    if (PQgetisnull(self->res, row, column)) {
+        Py_RETURN_NONE;
+    }
+
+    if (PQfformat(self->res, column)) {
+        // binary
+        double* value_in_nbo = (double*) PQgetvalue(self->res, row, column);
+        double value = double_from_nbo(value_in_nbo);
+        return PyFloat_FromDouble(value);
+    } else {
+        // text
+        char* text = PQgetvalue(self->res, row, column);        
+        return PyFloat_FromDouble(atof(text));
+    }
 }
 
 static PyObject* ForwardCursor_get_int(ForwardCursorObject *self, PyObject* const* args, Py_ssize_t nargs) {
-    PyObject* str = ForwardCursor_get_str(self, args, nargs);
-    if (!PyUnicode_Check(str)) {
-        return str;
+    if (!nargs) {
+        PyErr_SetString(PyExc_ValueError, "expected the column index.");
+        return NULL;
     }
-    PyObject* value = PyLong_FromUnicodeObject(str, 10);
-    Py_DECREF(str);
-    return value;
+
+    int column = check_column(self->res, args[0]);
+    if (column == -1) {
+        return NULL;
+    }
+
+    const int row = 0;
+    if (PQgetisnull(self->res, row, column)) {
+        Py_RETURN_NONE;
+    }
+
+    if (PQfformat(self->res, column)) {
+        // binary
+        Oid col_type = PQftype(self->res, column);
+        switch (col_type) {
+            case 21: {// INT2 
+                short* value_in_nbo = (short*) PQgetvalue(self->res, row, column);
+                short value = htons(*value_in_nbo);
+                return PyLong_FromLong(value);
+            }
+            case 23: { // INT4 
+                int* value_in_nbo = (int*) PQgetvalue(self->res, row, column);
+                int value = htonl(*value_in_nbo);
+                return PyLong_FromLong(value);
+            }
+            case 20: {// INT8 
+                long* value_in_nbo = (long*) PQgetvalue(self->res, row, column);
+                long value = long_from_nbo(value_in_nbo);
+                return PyLong_FromLong(value);
+            }
+            default:
+                PyErr_Format(PyExc_ValueError, "Cannot read binary as int for Oid type %i.", col_type);
+                return NULL;
+        }
+    } else {
+        // text
+        char* text = PQgetvalue(self->res, row, column);
+        return PyLong_FromLong(atol(text));
+    }
 }
 
+//TODO; 
 static PyObject* ForwardCursor_get_bool(ForwardCursorObject *self, PyObject* const* args, Py_ssize_t nargs) {
     PyObject* str = ForwardCursor_get_str(self, args, nargs);
     if (!PyUnicode_Check(str)) {
@@ -155,6 +233,7 @@ static PyObject* ForwardCursor_get_bool(ForwardCursorObject *self, PyObject* con
     return NULL;
 }
 
+//TODO; 
 static PyObject* ForwardCursor_get_value(ForwardCursorObject *self, PyObject* const* args, Py_ssize_t nargs) {
     if (!nargs) {
         PyErr_SetString(PyExc_ValueError, "expected the column index or name.");

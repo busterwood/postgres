@@ -72,7 +72,7 @@ static PyObject* Connection_execute_script(ConnectionObject *self, PyObject* con
             PyErr_SetString(PyExc_ConnectionError, error_message);
             return NULL;;
     }
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 static PyObject* Connection_execute(ConnectionObject *self, PyObject* const* args, Py_ssize_t nargs) {
@@ -114,7 +114,7 @@ static PyObject* Connection_execute(ConnectionObject *self, PyObject* const* arg
             PyErr_SetString(PyExc_ConnectionError, error_message);
             return NULL;
     }
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 static PyObject* Connection_query(ConnectionObject *self, PyObject* const* args, Py_ssize_t nargs) {
@@ -160,7 +160,7 @@ static PyObject* Connection_query(ConnectionObject *self, PyObject* const* args,
     return DataTable_new(res);
 }
 
-static PyObject* Connection_start_query(ConnectionObject *self, PyObject* const* args, Py_ssize_t nargs) {
+static PyObject* Connection_start_query(ConnectionObject *self, PyObject* const* args, Py_ssize_t nargs, PyObject *kwnames) {
     char* error_message = NULL;
         
     if (!nargs || !PyUnicode_Check(args[0])) {
@@ -168,6 +168,19 @@ static PyObject* Connection_start_query(ConnectionObject *self, PyObject* const*
         return NULL;
     }
     const char* sql_script = PyUnicode_AsUTF8(args[0]);
+
+    // return results as text or binary?
+    const int text = 0;
+    const int binary = 1;
+    int result_format = text;
+    Py_ssize_t nkwargs = (kwnames == NULL) ? 0 : PyTuple_GET_SIZE(kwnames);
+    if (nkwargs > 0) {
+        PyObject* kwname = PyTuple_GET_ITEM(kwnames, 0);
+        PyObject* binary_format = args[nargs];        
+        if (_PyUnicode_EqualToASCIIString(kwname, "binary_format") && PyBool_Check(binary_format) && binary_format == Py_True) {
+            result_format = binary;
+        }
+    }
 
     // convert all args to strings
     PyObject** str_args = (PyObject**)malloc(nargs * sizeof(PyObject));
@@ -177,9 +190,9 @@ static PyObject* Connection_start_query(ConnectionObject *self, PyObject* const*
         str_args[i] = PyObject_Str(args[i+1]);
         utf8_args[i] = PyUnicode_AsUTF8(str_args[i]); // get UTF8 version - no need to free this as it is freed when the str python object is freed
     }
-    
-    // make sure result is cleared
-    int send_status = PQsendQueryParams(self->conn, sql_script, nargs-1, NULL, utf8_args, NULL, NULL, 0);
+
+    // send the request but do not wait for the result
+    int send_status = PQsendQueryParams(self->conn, sql_script, nargs-1, NULL, utf8_args, NULL, NULL, result_format);
 
     // free args (this also frees the utf8 char* at the same time)
     for (size_t i = 0; i < nargs-1; i++) {
@@ -194,9 +207,10 @@ static PyObject* Connection_start_query(ConnectionObject *self, PyObject* const*
         return NULL;
     }
 
+    // request that results are sent back one row at a time (rather than them all being buffered into client memory)
     PQsetSingleRowMode(self->conn);
 
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 static PyObject* Connection_end_query(ConnectionObject *self, PyObject* const* args, Py_ssize_t nargs) {
@@ -212,7 +226,7 @@ static PyMethodDef Connection_methods[] = {
     {"execute_script", (PyCFunction) Connection_execute_script, METH_FASTCALL, "Run a multiple SQL statements, each one must not return any rows."},
     {"execute", (PyCFunction) Connection_execute, METH_FASTCALL, "Run a SQL statement that does not return any rows, e.g. INSERT, UPDATE or DELETE, and wait for the statement to finish."},
     {"query", (PyCFunction) Connection_query, METH_FASTCALL, "Run a SQL statement that returns a table of data."},
-    {"start_query", (PyCFunction) Connection_start_query, METH_FASTCALL, "Starts running a SQL statement but dont wait for the result."},
+    {"start_query", (PyCFunction) Connection_start_query, METH_FASTCALL|METH_KEYWORDS, "Starts running a SQL statement but dont wait for the result."},
     {"end_query", (PyCFunction) Connection_end_query, METH_FASTCALL, "Create a ForwardCursor for the previous call to start_query."},
     {NULL}  /* Sentinel */
 };
