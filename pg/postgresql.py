@@ -11,15 +11,14 @@ class DataTable:
     def column_count(self) -> int:
         raise NotImplementedError()
 
-    def __getitem__(self, location:tuple[int, int]) -> str:
-        raise NotImplementedError()
-
     def column_name(self, column: int) -> str:
         raise NotImplementedError()
 
-    def get_column_index(self, column_name: str) -> int:
+    def column_index(self, column_name: str) -> int:
         raise NotImplementedError()
 
+    def __getitem__(self, location:tuple[int, int]) -> str:
+        raise NotImplementedError()
 
 class ForwardCursor:
     """forward only stream of rows.  Saves memory by not buffering all rows"""
@@ -35,10 +34,10 @@ class ForwardCursor:
     def column_count(self) -> int:
         raise NotImplementedError()
 
-    def get_name(self, column: int) -> str:
+    def column_name(self, column: int) -> str:
         raise NotImplementedError()
 
-    def get_column_index(self, column_name: str) -> int:
+    def column_index(self, column_name: str) -> int:
         raise NotImplementedError()
 
     def is_null(self, column: int) -> bool:
@@ -58,7 +57,7 @@ class ForwardCursor:
 
     def __getattr__(self, name:str) -> str|None:
         """dynamic access to a column, accessed via the column name"""
-        column = self.get_column_index(name)
+        column = self.column_index(name)
         return None if self.is_null(column) else self.get_str(column)
     
 
