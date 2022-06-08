@@ -1,7 +1,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <libpq-fe.h>
-#include <arpa/inet.h>
+#include <endian.h>
 
 typedef struct {
     PyObject_HEAD
@@ -115,42 +115,6 @@ static PyObject* ForwardCursor_get_str(ForwardCursorObject *self, PyObject* cons
     return PyUnicode_FromString(value);
 }
 
-
-static inline float float_from_nbo(float* inPtr) {
-    float out;
-    float* outPtr = &out;
-    uint32_t *i = (uint32_t *)inPtr;
-    uint32_t *r = (uint32_t *)outPtr;
-
-    /* convert input to network byte order */
-    r[0] = htonl((uint32_t)*i);
-    return out;
-}
-
-static inline double double_from_nbo(double* inPtr) {
-    double out;
-    double* outPtr = &out;
-    uint64_t *i = (uint64_t *)inPtr;
-    uint32_t *r = (uint32_t *)outPtr;
-
-    /* convert input to network byte order */
-    r[0] = htonl((uint32_t)((*i) >> 32));
-    r[1] = htonl((uint32_t)*i);
-    return out;
-}
-
-static inline long long_from_nbo(long* inPtr) {
-    long out;
-    long* outPtr = &out;
-    uint64_t *i = (uint64_t *)inPtr;
-    uint32_t *r = (uint32_t *)outPtr;
-
-    /* convert input to network byte order */
-    r[0] = htonl((uint32_t)((*i) >> 32));
-    r[1] = htonl((uint32_t)*i);
-    return out;
-}
-
 static PyObject* ForwardCursor_get_float(ForwardCursorObject *self, PyObject* const* args, Py_ssize_t nargs) {
     if (!nargs) {
         PyErr_SetString(PyExc_ValueError, "expected the column index.");
@@ -172,14 +136,16 @@ static PyObject* ForwardCursor_get_float(ForwardCursorObject *self, PyObject* co
         Oid col_type = PQftype(self->res, column);
         switch (col_type) {
             case 700: {// FLOAT4 
-                float* value_in_nbo = (float*) PQgetvalue(self->res, row, column);
-                float value = float_from_nbo(value_in_nbo);
-                return PyFloat_FromDouble(value);
+                union { uint32_t ui; float fp;} swap;
+                uint32_t* value_in_nbo = (uint32_t*) PQgetvalue(self->res, row, column);
+                swap.ui = be32toh(*value_in_nbo);
+                return PyFloat_FromDouble(swap.fp);
             }
             case 701: {// FLOAT8 
-                double* value_in_nbo = (double*) PQgetvalue(self->res, row, column);
-                double value = double_from_nbo(value_in_nbo);
-                return PyFloat_FromDouble(value);
+                union { uint64_t ui; double fp;} swap;
+                uint64_t* value_in_nbo = (uint64_t*) PQgetvalue(self->res, row, column);
+                swap.ui = be64toh(*value_in_nbo);
+                return PyFloat_FromDouble(swap.fp);
             }
             default:
                 PyErr_Format(PyExc_ValueError, "Cannot read binary as float for Oid type %i.", col_type);
@@ -213,19 +179,22 @@ static PyObject* ForwardCursor_get_int(ForwardCursorObject *self, PyObject* cons
         Oid col_type = PQftype(self->res, column);
         switch (col_type) {
             case 21: {// INT2 
-                short* value_in_nbo = (short*) PQgetvalue(self->res, row, column);
-                short value = ntohs(*value_in_nbo);
-                return PyLong_FromLong(value);
+                union { uint16_t ui; short i;} swap;
+                uint16_t* value_in_nbo = (uint16_t*) PQgetvalue(self->res, row, column);
+                swap.ui = be16toh(*value_in_nbo);
+                return PyLong_FromLong(swap.i);
             }
             case 23: { // INT4 
-                int* value_in_nbo = (int*) PQgetvalue(self->res, row, column);
-                int value = ntohl(*value_in_nbo);
-                return PyLong_FromLong(value);
+                union { uint32_t ui; int i;} swap;
+                uint32_t* value_in_nbo = (uint32_t*) PQgetvalue(self->res, row, column);
+                swap.ui = be32toh(*value_in_nbo);
+                return PyLong_FromLong(swap.i);
             }
             case 20: {// INT8 
-                long* value_in_nbo = (long*) PQgetvalue(self->res, row, column);
-                long value = long_from_nbo(value_in_nbo);
-                return PyLong_FromLong(value);
+                union { uint64_t ui; long i;} swap;
+                uint64_t* value_in_nbo = (uint64_t*) PQgetvalue(self->res, row, column);
+                swap.ui = be64toh(*value_in_nbo);
+                return PyLong_FromLong(swap.i);
             }
             default:
                 PyErr_Format(PyExc_ValueError, "Cannot read binary as int for Oid type %i.", col_type);
@@ -312,7 +281,7 @@ static PyObject* ForwardCursor_get_value(ForwardCursorObject *self, PyObject* co
         // case 1184: // TIMESTAMP_TZ 
         // case 1186: // INTERVAL 
         // case 1266: // TIME_TZ 
-        // case 1560: // BIT 
+        // case 1560: // BIT        
         default:
             // pretend everything else is a string, enums for example
             return ForwardCursor_get_str(self, args, nargs);
