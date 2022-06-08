@@ -87,7 +87,7 @@ static PyObject* Connection_execute(ConnectionObject *self, PyObject* const* arg
     // convert all args to strings
     PyObject** str_args = (PyObject**)malloc(nargs * sizeof(PyObject));
     const char** utf8_args = (const char**)malloc(nargs * sizeof(char*));
-    for (size_t i = 0; i < nargs-1; i++)
+    for (Py_ssize_t i = 0; i < nargs-1; i++)
     {
         str_args[i] = PyObject_Str(args[i+1]);
         utf8_args[i] = PyUnicode_AsUTF8(str_args[i]); // get UTF8 version - no need to free this as it is freed when the str python object is freed
@@ -97,7 +97,7 @@ static PyObject* Connection_execute(ConnectionObject *self, PyObject* const* arg
     PGresult* res __attribute__((cleanup(free_result))) = PQexecParams(self->conn, sql_script, nargs-1, NULL, utf8_args, NULL, NULL, 0);
 
     // free args (this also frees the utf8 char* at the same time)
-    for (size_t i = 0; i < nargs-1; i++) {
+    for (Py_ssize_t i = 0; i < nargs-1; i++) {
         Py_DECREF(str_args[i]);
     }
     free(str_args);
@@ -129,7 +129,7 @@ static PyObject* Connection_query(ConnectionObject *self, PyObject* const* args,
     // convert all args to strings
     PyObject** str_args = (PyObject**)malloc(nargs * sizeof(PyObject));
     const char** utf8_args = (const char**)malloc(nargs * sizeof(char*));
-    for (size_t i = 0; i < nargs-1; i++)
+    for (Py_ssize_t i = 0; i < nargs-1; i++)
     {
         str_args[i] = PyObject_Str(args[i+1]);
         utf8_args[i] = PyUnicode_AsUTF8(str_args[i]); // get UTF8 version - no need to free this as it is freed when the str python object is freed
@@ -139,7 +139,7 @@ static PyObject* Connection_query(ConnectionObject *self, PyObject* const* args,
     PGresult* res = PQexecParams(self->conn, sql_script, nargs-1, NULL, utf8_args, NULL, NULL, 0);
 
     // free args (this also frees the utf8 char* at the same time)
-    for (size_t i = 0; i < nargs-1; i++) {
+    for (Py_ssize_t i = 0; i < nargs-1; i++) {
         Py_DECREF(str_args[i]);
     }
     free(str_args);
@@ -185,7 +185,7 @@ static PyObject* Connection_start_query(ConnectionObject *self, PyObject* const*
     // convert all args to strings
     PyObject** str_args = (PyObject**)malloc(nargs * sizeof(PyObject));
     const char** utf8_args = (const char**)malloc(nargs * sizeof(char*));
-    for (size_t i = 0; i < nargs-1; i++)
+    for (Py_ssize_t i = 0; i < nargs-1; i++)
     {
         str_args[i] = PyObject_Str(args[i+1]);
         utf8_args[i] = PyUnicode_AsUTF8(str_args[i]); // get UTF8 version - no need to free this as it is freed when the str python object is freed
@@ -195,7 +195,7 @@ static PyObject* Connection_start_query(ConnectionObject *self, PyObject* const*
     int send_status = PQsendQueryParams(self->conn, sql_script, nargs-1, NULL, utf8_args, NULL, NULL, result_format);
 
     // free args (this also frees the utf8 char* at the same time)
-    for (size_t i = 0; i < nargs-1; i++) {
+    for (Py_ssize_t i = 0; i < nargs-1; i++) {
         Py_DECREF(str_args[i]);
     }
     free(str_args);
@@ -339,11 +339,12 @@ static PyModuleDef ConnectionModule = {
 extern PyTypeObject DataTableType;
 extern PyTypeObject ForwardCursorType;
 
-PyMODINIT_FUNC PyInit_libpg(void)
+PyMODINIT_FUNC PyInit_pg(void)
 {
     PyObject *m;
     if (PyType_Ready(&ConnectionType) < 0 || PyType_Ready(&DataTableType) < 0 || PyType_Ready(&ForwardCursorType) < 0)
         return NULL;
+
 
     m = PyModule_Create(&ConnectionModule);
     if (m == NULL)

@@ -105,7 +105,7 @@ static PyObject* DataTable_GetItem(PyObject* obj, PyObject* key) {
         }
 
         PyObject* list = PyList_New(columns);
-        for (size_t i = 0; i < columns; i++)
+        for (int i = 0; i < columns; i++)
         {
             char* value = PQgetvalue(self->res, row, i);
             PyList_SetItem(list, i, PyUnicode_FromString(value));
@@ -131,7 +131,7 @@ static PyObject* DataTable_GetItem_sequence(PyObject* obj, Py_ssize_t row) {
 
     int columns = PQnfields(self->res);
     PyObject* list = PyList_New(columns);
-    for (size_t i = 0; i < columns; i++)
+    for (int i = 0; i < columns; i++)
     {
         char* value = PQgetvalue(self->res, row, i);
         PyList_SetItem(list, i, PyUnicode_FromString(value));
@@ -150,17 +150,14 @@ static PyMethodDef DataTable_methods[] = {
     {NULL}  /* Sentinel */
 };
 
-static PyMappingMethods DataTable_mapping_methods[] = {
-    DataTable_len,
-    DataTable_GetItem,
-    NULL,
+static PyMappingMethods DataTable_mapping_methods = {
+    .mp_length = DataTable_len,
+    .mp_subscript = DataTable_GetItem,
 };
 
-static PySequenceMethods DataTable_sequence_methods[] = {
-    DataTable_len,
-    NULL,
-    NULL,
-    DataTable_GetItem_sequence,
+static PySequenceMethods DataTable_sequence_methods = {
+    .sq_length = DataTable_len,
+    .sq_item = DataTable_GetItem_sequence,
 };
 
 PyTypeObject DataTableType = {
@@ -173,15 +170,8 @@ PyTypeObject DataTableType = {
     .tp_new = NULL,
     .tp_dealloc = (destructor) DataTable_dealloc,
     .tp_methods = DataTable_methods,
-    .tp_as_mapping = DataTable_mapping_methods,
-    .tp_as_sequence = DataTable_sequence_methods,
-};
-
-static PyModuleDef DataTableModule = {
-    PyModuleDef_HEAD_INIT,
-    .m_name = "DataTable",
-    .m_doc = "Example module that creates an extension type.",
-    .m_size = -1,
+    .tp_as_mapping = &DataTable_mapping_methods,
+    .tp_as_sequence = &DataTable_sequence_methods,
 };
 
 // allow the connection to create a data table

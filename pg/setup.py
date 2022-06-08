@@ -1,8 +1,11 @@
-from distutils.ccompiler import new_compiler
-from distutils import sysconfig
+from distutils.core import setup, Extension
 
-c = new_compiler()
-c.add_include_dir( sysconfig.get_python_inc() )
-c.add_include_dir("/usr/include/postgresql")
-objects = c.compile(["Connection.c", "DataTable.c", "ForwardCursor.c"], extra_postargs=["-fPIC", "-O3"])
-c.link_shared_lib(objects, "pg", output_dir=".", libraries=["pq"])
+module1 = Extension(
+    'pg', 
+    include_dirs=["/usr/include/postgresql"], 
+    libraries=["pq"], 
+    sources=["Connection.c", "DataTable.c", "ForwardCursor.c"],    
+    extra_link_args=["-flto"],
+    extra_compile_args=["-march=native"]
+    )
+setup(name="pg", version="1.0", ext_modules=[module1], )
