@@ -6,6 +6,6 @@ module1 = Extension(
     libraries=["pq"], 
     sources=["Connection.c", "DataTable.c", "ForwardCursor.c"],    
     extra_link_args=["-flto"],
-    extra_compile_args=["-march=native"]
+    extra_compile_args=["-march=native", "-fno-semantic-interposition"]
     )
 setup(name="pg", version="1.0", ext_modules=[module1], )

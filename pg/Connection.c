@@ -93,7 +93,7 @@ static PyObject* Connection_execute(ConnectionObject *self, PyObject* const* arg
         utf8_args[i] = PyUnicode_AsUTF8(str_args[i]); // get UTF8 version - no need to free this as it is freed when the str python object is freed
     }
     
-    // make sure result is cleared
+    // make sure result is cleared, GCC-specific
     PGresult* res __attribute__((cleanup(free_result))) = PQexecParams(self->conn, sql_script, nargs-1, NULL, utf8_args, NULL, NULL, 0);
 
     // free args (this also frees the utf8 char* at the same time)
@@ -116,6 +116,80 @@ static PyObject* Connection_execute(ConnectionObject *self, PyObject* const* arg
     }
     Py_RETURN_NONE;
 }
+
+static PyObject* Connection_is_busy(ConnectionObject *self, PyObject* const* args, Py_ssize_t nargs) {
+    char* error_message = NULL;
+    if (PQconsumeInput(self->conn) == 0) {
+        error_message = PQerrorMessage(self->conn);
+        PyErr_SetString(PyExc_ConnectionError, error_message);
+        return NULL;
+    }
+
+    if (PQisBusy(self->conn)) {
+        Py_RETURN_TRUE;
+    } else {
+        Py_RETURN_FALSE;
+    }
+}
+
+static PyObject* Connection_start_execute(ConnectionObject *self, PyObject* const* args, Py_ssize_t nargs) {
+    char* error_message = NULL;
+        
+    if (!nargs || !PyUnicode_Check(args[0])) {
+        PyErr_SetString(PyExc_ValueError, "expected the first argument 'sql_script' to be a string");
+        return NULL;
+    }
+    const char* sql_script = PyUnicode_AsUTF8(args[0]);
+
+    // convert all args to strings
+    PyObject** str_args = (PyObject**)malloc(nargs * sizeof(PyObject));
+    const char** utf8_args = (const char**)malloc(nargs * sizeof(char*));
+    for (Py_ssize_t i = 0; i < nargs-1; i++)
+    {
+        str_args[i] = PyObject_Str(args[i+1]);
+        utf8_args[i] = PyUnicode_AsUTF8(str_args[i]); // get UTF8 version - no need to free this as it is freed when the str python object is freed
+    }
+
+    // send the request but do not wait for the result
+    int send_status = PQsendQueryParams(self->conn, sql_script, nargs-1, NULL, utf8_args, NULL, NULL, 0);
+
+    // free args (this also frees the utf8 char* at the same time)
+    for (Py_ssize_t i = 0; i < nargs-1; i++) {
+        Py_DECREF(str_args[i]);
+    }
+    free(str_args);
+    free(utf8_args);
+
+    if (send_status == 0) {
+        error_message = PQerrorMessage(self->conn);
+        PyErr_SetString(PyExc_ConnectionError, error_message);
+        return NULL;
+    }
+
+    Py_RETURN_NONE;
+}
+
+
+static PyObject* Connection_end_execute(ConnectionObject *self, PyObject* const* args, Py_ssize_t nargs) {
+    char* error_message = NULL;
+
+    // make sure result is cleared, GCC-specific
+    PGresult* res __attribute__((cleanup(free_result))) = PQgetResult(self->conn);
+    
+    ExecStatusType status = PQresultStatus(res);
+    switch (status) {
+        case PGRES_COMMAND_OK:
+        case PGRES_TUPLES_OK:
+        case PGRES_EMPTY_QUERY:        
+            PQconsumeInput(self->conn);
+            Py_RETURN_NONE;
+        default:
+            error_message = PQerrorMessage(self->conn);
+            PyErr_SetString(PyExc_ConnectionError, error_message);
+            return NULL;
+    }
+}
+
 
 static PyObject* Connection_query(ConnectionObject *self, PyObject* const* args, Py_ssize_t nargs) {
     char* error_message = NULL;
@@ -303,7 +377,10 @@ static PyObject* Connection_close(ConnectionObject *self, PyObject* const* args,
 
 static PyMethodDef Connection_methods[] = {
     {"execute_script", (PyCFunction) Connection_execute_script, METH_FASTCALL, "Run a multiple SQL statements, each one must not return any rows."},
-    {"execute", (PyCFunction) Connection_execute, METH_FASTCALL, "Run a SQL statement that does not return any rows, e.g. INSERT, UPDATE or DELETE, and wait for the statement to finish."},
+    {"execute", (PyCFunction) Connection_execute, METH_FASTCALL, "Run a SQL statement that does not return any rows, e.g. INSERT, UPDATE or DELETE, and wait for the statement to finish."},    
+    {"is_busy", (PyCFunction) Connection_is_busy, METH_FASTCALL, "Can be checked after calling start_execute or start_query to tell if the command is still running."},
+    {"start_execute", (PyCFunction) Connection_start_execute, METH_FASTCALL, "Starts running a SQL statement but dont wait for the result."},
+    {"end_execute", (PyCFunction) Connection_end_execute, METH_FASTCALL, "Check the result of the previously called start_execute."},
     {"query", (PyCFunction) Connection_query, METH_FASTCALL, "Run a SQL statement that returns a table of data."},
     {"start_query", (PyCFunction) Connection_start_query, METH_FASTCALL|METH_KEYWORDS, "Starts running a SQL statement but dont wait for the result."},
     {"end_query", (PyCFunction) Connection_end_query, METH_FASTCALL, "Create a ForwardCursor for the previous call to start_query."},
@@ -338,13 +415,15 @@ static PyModuleDef ConnectionModule = {
 // defined in DataTable.c
 extern PyTypeObject DataTableType;
 extern PyTypeObject ForwardCursorType;
+extern void set_ForwardCursorType_dictoffset();
 
-PyMODINIT_FUNC PyInit_pg(void)
-{
+PyMODINIT_FUNC PyInit_pg(void) {
     PyObject *m;
+
+    void set_ForwardCursorType_dictoffset();
+
     if (PyType_Ready(&ConnectionType) < 0 || PyType_Ready(&DataTableType) < 0 || PyType_Ready(&ForwardCursorType) < 0)
         return NULL;
-
 
     m = PyModule_Create(&ConnectionModule);
     if (m == NULL)
