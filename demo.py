@@ -19,11 +19,11 @@ with pg.Connection(connection_string) as conn:
     conn.execute_script("CREATE SCHEMA cja; CREATE TABLE cja.one(id int);")
     
     # forward-only cursor, single_row_mode, minimize memory on client
-    cursor = conn.query_stream("select $1 as first_col", 1)
+    cursor = conn.start_query("select $1 as first_col", 1)
     while cursor.next_row():
         print(cursor[0])            # __getitem__ support
         print(cursor.first_col)     # __getattr__ support for dynamic attributes
-        print(cursor.get_name(0))   # get column name
+        print(cursor.column_name(0))   # get column name
         print(cursor.is_null(0))    # is the value NULL in the database
         print(cursor.get_bool(0))   # get typed value
         print(cursor.get_int(0))    # get typed value
