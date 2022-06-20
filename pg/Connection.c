@@ -182,6 +182,8 @@ static PyObject* Connection_end_execute(ConnectionObject *self, PyObject* const*
         case PGRES_TUPLES_OK:
         case PGRES_EMPTY_QUERY:        
             PQconsumeInput(self->conn);
+            free_result(&res);
+            res = PQgetResult(self->conn);
             Py_RETURN_NONE;
         default:
             error_message = PQerrorMessage(self->conn);
